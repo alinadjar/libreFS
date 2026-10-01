@@ -1,0 +1,9 @@
+# How many logical volumes to add when a collection runs out of writable space.
+# Actual volumes = copy count x this number.
+# 000 (this stack) uses copy_1, so a new bucket starts with one volume.
+[master.volume_growth]
+copy_1 = 1
+copy_2 = 1
+copy_3 = 1
+copy_other = 1
+threshold = 0.9

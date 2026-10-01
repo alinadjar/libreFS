@@ -1,0 +1,16 @@
+[Unit]
+Description=librefs object storage (SeaweedFS via Docker Compose)
+After=docker.service
+Requires=docker.service
+RequiresMountsFor=/var/lib/librefs/object-storage
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/librefs
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
