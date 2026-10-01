@@ -419,18 +419,58 @@ sudo systemctl enable --now librefs-object-storage.service
 
 The unit runs `docker compose up -d` and `docker compose stop`. It does not delete data.
 
-## Backup
+## Backup and restore
 
-Back up the disk, not the S3 API. Copying objects out through S3 and writing them back into the same store does not protect you from losing that disk.
+The separate device is the live copy. It is not a backup. A dead disk, a bad `mkfs`, or deleting the mount loses the only copy. Put a second copy on another disk or another machine.
 
-Stop the stack or snapshot the filesystem, then copy:
+Copy the filesystem, not the S3 API. Uploading objects back into this same store does not protect you from losing the device.
 
-- `$DATA_DIR/volume` — object bytes
-- `$DATA_DIR/filer` — metadata (leveldb). Losing this loses the bucket index even if the volume files remain
-- `$DATA_DIR/master` — replaceable cluster state
-- `.env` — credentials, store it with your secrets
+This disk is one ext4 partition, so it has no snapshot of its own. Stop the stack, then copy. `volume` and `filer` must come from that same stopped moment. The filer index names needles inside the volume files. A newer index with older volume files, or the reverse, makes objects unreadable.
 
-The filer metadata store is local leveldb, which is what SeaweedFS recommends for a single filer. A second filer requires a shared metadata database (Postgres is the usual choice). Plan that move before you add another filer; do not run two filers on this default store.
+| Path | Backup |
+| --- | --- |
+| `$DATA_DIR/volume` | Required. The object bytes. |
+| `$DATA_DIR/filer` | Required, from the same stop as `volume`. The bucket index. |
+| `$DATA_DIR/config` | Required. `s3.json`, the global admin key. |
+| `.env` | Required. Store it with your secrets, not inside the data disk's public copy. |
+| `$DATA_DIR/master` | Optional. SeaweedFS rebuilds this map from the volume server. |
+| `$DATA_DIR/admin` | Optional. UI state, not objects. |
+
+From `/opt/librefs`, with `DATA_DIR=/var/lib/librefs/object-storage`:
+
+```sh
+docker compose stop
+sudo mkdir -p /backup/librefs
+sudo rsync -a --delete /var/lib/librefs/object-storage/ /backup/librefs/data/
+sudo cp -a .env /backup/librefs/env
+docker compose up -d
+```
+
+`/backup/librefs` must be a different device than `/var/lib/librefs/object-storage`. Confirm that with `findmnt` before the first run. `--delete` makes the backup match the source, including deletions. Keep more than one dated copy if you need to undo a bad backup:
+
+```sh
+sudo rsync -a /var/lib/librefs/object-storage/ /backup/librefs/$(date +%F)/
+```
+
+### Restore
+
+Restore `volume`, `filer`, and `config` from the same backup. Confirm the data device is actually mounted before you copy anything. If the mount failed, `/var/lib/librefs/object-storage` is an empty directory on the OS disk and a restore would land in the wrong place.
+
+```sh
+findmnt /var/lib/librefs/object-storage
+docker compose stop
+sudo rsync -a --delete /backup/librefs/data/ /var/lib/librefs/object-storage/
+sudo cp -a /backup/librefs/env /opt/librefs/.env
+docker compose up -d
+aws --profile seaweed_FX s3 ls
+aws --profile seaweed_FX s3 cp s3://photos/report.pdf /tmp/report.pdf
+```
+
+`docker compose up` fixes ownership of each data directory for the SeaweedFS user inside the image. Download one object you know was in that backup. A bucket list alone does not prove the volume files came along with the index.
+
+On a new server: mount the device at the same path (or set `DATA_DIR` to wherever it is mounted), restore `.env` next to the compose file, then `docker compose up -d`. The systemd unit waits for `/var/lib/librefs/object-storage` to be mounted before it starts the containers.
+
+The filer store is local leveldb, which is what SeaweedFS recommends for a single filer. A second filer needs a shared metadata database such as Postgres. Move to that before you add another filer.
 
 ## Credentials
 
